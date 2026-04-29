@@ -199,8 +199,12 @@ def call_claude(
         cmd += ["--tools", ""]
     if json_schema is not None:
         cmd += ["--json-schema", json.dumps(json_schema)]
-    cmd.append(user_prompt)
 
+    # Pass the prompt via stdin rather than as a positional argv. Claude's
+    # `--tools` flag is variadic (`<tools...>` per its --help), and depending
+    # on the parent shell's stdin handling commander can consume the trailing
+    # positional as another --tools value, leaving claude with no prompt.
+    # Stdin is the failsafe path the CLI's own error message recommends.
     try:
         proc = subprocess.run(
             cmd,
@@ -208,6 +212,7 @@ def call_claude(
             text=True,
             timeout=timeout,
             check=False,
+            input=user_prompt,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"claude call timed out after {timeout}s") from None
