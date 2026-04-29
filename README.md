@@ -106,6 +106,69 @@ Web search is wired via `--tools "WebSearch"` on every model call when `--search
 
 ---
 
+## Adapting to another CLI
+
+The harness intentionally has only one place that talks to a model — the `call_claude(...)` function in `debate.py`. Everything else is provider-agnostic. Swapping `claude` for another agentic CLI is a small, contained change, but you have to map five concerns:
+
+1. **Non-interactive invocation** — `claude` uses `claude -p`; you need the equivalent flag/subcommand for stdout-only runs.
+2. **Model selection** — what flag picks the model, and what aliases does the target CLI accept?
+3. **System-prompt / persona injection** — every persona has its own system prompt, and that's the whole point. If the target CLI lacks a `--system-prompt` flag, you need a different injection path: prepend to the user prompt, write to a profile/config file, or override config inline.
+4. **Tool gating** — `claude` lets you pass `--tools ""` to disable everything or `--tools "WebSearch"` to enable just one tool. The target CLI needs a similar way to control tool access.
+5. **Structured output** — the convergence judge relies on `claude`'s `--json-schema` for reliable JSON. If the target lacks that, you fall back to prompt-instructed JSON and the existing `_extract_json` helper, which already strips surrounding prose.
+
+### Worked example: porting to OpenAI Codex CLI
+
+[`codex`](https://github.com/openai/codex) covers most of the same surface but with different verbs. The mapping:
+
+| Concern | `claude` flag | `codex` equivalent |
+|---|---|---|
+| Non-interactive mode | `claude -p` | `codex exec` (alias `codex e`) |
+| Model selection | `--model haiku\|sonnet\|opus` | `-m, --model gpt-5\|o3\|…` (whatever model aliases your `codex` install accepts) |
+| Persona / system prompt | `--system-prompt "<text>"` | **No direct equivalent.** Bake the persona into the prompt itself, or pre-define it in `~/.codex/config.toml` as a profile, or pass `-c instructions="<text>"` per call. |
+| Web search | `--tools "WebSearch"` | `--search` |
+| Disable other tools | `--tools ""` | No exact equivalent — use `--sandbox read-only` and `-a never` to suppress execution and approval prompts in scripted runs. |
+| Structured JSON output | `--json-schema '{…}'` | No direct equivalent. Tell the model in the prompt to "respond with JSON only matching `{schema}`" and rely on `_extract_json`'s existing fallback. |
+| Quiet config / clean state | `--setting-sources ""` | `-c key=value` overrides per call, or a dedicated minimal profile (`-p debate`). |
+
+### Concrete changes you'd make in `debate.py`
+
+> The blocks below are illustrative diffs — this branch does **not** modify the code. Treat them as the recipe for a future `debate-codex` fork.
+
+- **Preflight:**
+  ```python
+  if shutil.which("codex") is None:
+      sys.exit("error: 'codex' CLI not found on PATH. Install: https://github.com/openai/codex")
+  ```
+- **Model-call wrapper** — `call_claude` becomes `call_codex` (or generalise behind a provider abstraction). The new `cmd` shape:
+  ```python
+  cmd = [
+      "codex", "exec",
+      "-m", model,                    # e.g. "gpt-5", "o3"
+      "-a", "never",                  # no interactive approval
+      "--sandbox", "read-only",       # no side effects
+  ]
+  if search:
+      cmd.append("--search")
+  # No --system-prompt: prepend the persona to the user message instead.
+  baked = f"{system_prompt}\n\n---\n\n{user_prompt}"
+  cmd.append(baked)
+  ```
+- **Default model aliases** — change `haiku` → e.g. `gpt-5-mini`, `sonnet` → `gpt-5` (or whatever your install supports). Update the options table in this README and the model-related copy in `personas.yaml` if any.
+- **Convergence judge** — drop the `--json-schema` arg and append a strict instruction to the system prompt: `"Respond with JSON only: {\"converged\": bool, \"reason\": string}. No prose, no code fences."`. The existing `_extract_json` already extracts the first `{…}` block as a fallback.
+- **Persona prompts** — the shipped prompts are identity-first ("You are the WHITE HAT…") which survives prompt-injection-as-user-message reasonably well; no edits required, but you may want to tighten the strongest constraints.
+
+### Caveats
+
+- **Persona drift.** Without a true system prompt, the persona is just part of the user message — the model can choose to ignore or reframe it. Identity-first prompts mostly hold, but expect more occasional drift than with `claude`'s `--system-prompt`.
+- **Token accounting.** Baking the persona into the user prompt means it's billed as input every round, not amortised by `claude`'s prompt cache. The "rough money" numbers in [Cost notes](#cost-notes) are calibrated for `claude` — re-budget for your provider's pricing.
+- **`AGENTS.md` leakage.** Codex auto-loads `AGENTS.md` from the working directory by default. If you have one in your `debate/` checkout it will silently bleed into every persona call. Either pass `-C /tmp` (or another neutral cwd) or remove `AGENTS.md` when running the harness.
+- **Approval prompts.** `claude -p` is strictly non-interactive; `codex` defaults are not. Always pass `-a never` (or `--full-auto`) for scripted use, otherwise the subprocess hangs waiting on user input.
+- **Streaming and exit codes.** Verify how the target CLI handles partial output, ANSI codes, and non-zero exits before assuming the existing capture logic works unchanged.
+
+The same five-concern map applies to other CLIs — `aider`, `gemini`, `cursor`, local Ollama wrappers — so the porting recipe generalises. Most of the work is in finding the right injection path for the system prompt.
+
+---
+
 ## Editing personas
 
 Every prompt and every persona lives in `personas.yaml` next to the script. Adding a new role or even a whole new debate type is YAML-only — no Python changes.
