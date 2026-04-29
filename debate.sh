@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 #
-# debate.sh - Programmable AI agent demo: parallel personas + synthesis.
+# debate.sh - DEPRECATED legacy tool. Kept for reference only.
 #
-# Asks the user's question in parallel to three "personas" of the same model
-# (de Bono White / Yellow / Black hats), waits for all three to finish, then
-# pipes the combined output into a fourth call that synthesises a balanced
-# answer.
+#   For the current multi-format harness (six hats, boardroom, socratic,
+#   negotiation; iterative rounds; web search; transcripts), use:
+#       debate.py
+#   See ../README.md.
+#
+# Original behaviour (still works): asks the user's question in parallel to
+# three personas of the same model (de Bono White / Yellow / Black hats),
+# waits for all three to finish, then pipes the combined output into a
+# fourth call that synthesises a balanced answer.
 #
 # Usage:
 #   ./debate.sh "Should we adopt Rust for our core service?"

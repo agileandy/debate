@@ -13,9 +13,9 @@ socratic, negotiation), iterative rounds where each persona sees prior turns,
 convergence-capped loops, configurable verbosity, optional web search via the
 claude CLI's WebSearch tool, and a single --model flag.
 
-Personas live in ~/bin/personas.yaml (or --personas-file). The script shells
-out to the `claude` CLI for every model call — auth and model selection are
-handled by the CLI.
+Personas live in `personas.yaml` next to this script (override with
+--personas-file). The script shells out to the `claude` CLI for every
+model call — auth and model selection are handled by the CLI.
 
 Usage:
     debate.py hats "Should we adopt Rust for our core service?"
@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -636,6 +637,13 @@ def build_parser(types: dict[str, DebateType]) -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if shutil.which("claude") is None:
+        sys.exit(
+            "error: 'claude' CLI not found on PATH.\n"
+            "  Install: https://github.com/anthropics/claude-code\n"
+            "  Then verify with: claude --version"
+        )
+
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--personas-file", type=Path, default=DEFAULT_PERSONAS)
     pre_args, _ = pre.parse_known_args(argv)
